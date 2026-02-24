@@ -117,32 +117,41 @@ IAM MFA, S3 설정, EBS 암호화, DynamoDB 백업, Lambda 런타임, SNS 암호
       ← "32개 이슈 발견: Critical 3개, High 2개, Medium 27개"
 ```
 
-### 직접 Python에서
+### 직접 Python에서 (모듈화 구조)
 
 ```python
-import server
+import sys
+sys.path.append('src')
 
-# 기본 보안 체크
-result = server.run_security_checks()
+from config import AppConfig
+from mcp_tools import MCPToolsManager
 
-# 종합 보안 체크
-result = server.run_all_foundational_security_checks()
+# 설정 로드 및 초기화
+config = AppConfig.load()
+tools_manager = MCPToolsManager(config)
 
-# 특정 쿼리 실행
-result = server.query_aws("SELECT count(*) FROM aws_ec2_instance")
+# 개별 컴포넌트 사용
+security_checker = tools_manager.security_checker
+report_generator = tools_manager.report_generator
 
-# HTML 보고서 생성
-data = server.get_report_data()
-# AI가 분석 작성 후
-report = server.generate_html_report(executive_summary, compute_analysis, ...)
+# 보안 체크 실행
+results = security_checker.run_checks()  # 기본 8개
+results_all = security_checker.run_checks()  # 전체 20개
+
+# 보고서 생성
+data = report_generator.generate_summary_data()
+# AI 분석 후 HTML 생성
+report_path = report_generator.generate_html_report(analysis_dict)
 ```
 
 ## 📈 성능 최적화
 
-- **데이터 캐싱**: 5분간 쿼리 결과 재사용
-- **토큰 절약**: AI에게는 1,600자 압축 통계만 전달
+- **데이터 캐싱**: 5분간 쿼리 결과 재사용 (`steampipe_client.py`)
+- **토큰 절약**: AI에게는 1,600자 압축 통계만 전달 (`report_generator.py`)
 - **병렬 처리**: 독립적인 쿼리들을 동시 실행
 - **HTML 직접 렌더링**: AI 토큰 소모 없이 데이터 테이블 생성
+- **모듈별 로딩**: 필요한 컴포넌트만 메모리 로드
+- **설정 기반**: 환경변수로 타임아웃, 캐시 등 튜닝 가능
 
 ## 🔍 보안 체크 결과 예시
 
@@ -166,16 +175,32 @@ Controls executed: 20 / 339 total available
 ...
 ```
 
-## 📁 프로젝트 구조
+## 📁 프로젝트 구조 (모듈화)
 
 ```
 mcp-test/
-├── server.py              # MCP 서버 메인 파일
+├── server.py              # MCP 서버 진입점 (37줄)
+├── src/                   # 모듈화된 소스 코드
+│   ├── config.py          # 설정 관리 (환경변수, 기본값)
+│   ├── steampipe_client.py # Steampipe CLI 클라이언트 (캐싱, 에러처리)
+│   ├── security_checker.py # AWS 보안 컴플라이언스 체커
+│   ├── report_generator.py # HTML 보고서 생성기
+│   └── mcp_tools.py       # MCP 도구 등록 및 관리
 ├── report.html            # 생성된 HTML 보고서 (gitignore)
 ├── README.md              # 프로젝트 문서
 ├── .gitignore            # Git 무시 파일
 └── steampipe-mod-aws-compliance/  # AWS 표준 참조 (gitignore)
 ```
+
+### 🏗️ 모듈별 역할
+
+| 모듈 | 역할 | 주요 클래스/함수 |
+|------|------|------------------|
+| `config.py` | 설정 관리 | `AppConfig`, `SteampipeConfig`, `ReportConfig` |
+| `steampipe_client.py` | Steampipe 연동 | `SteampipeClient`, `ResultFormatter` |
+| `security_checker.py` | 보안 체크 | `SecurityChecker`, `SecurityControl` |
+| `report_generator.py` | 보고서 생성 | `ReportGenerator` |
+| `mcp_tools.py` | MCP 통합 | `MCPToolsManager` |
 
 ## 🌟 주요 장점
 
@@ -194,6 +219,12 @@ mcp-test/
 - 전문적인 HTML 보고서 자동 생성
 - Amazon Q Developer 완벽 통합
 
+### 4. **유지보수성** ⭐
+- **모듈화된 아키텍처**: 관심사 분리로 코드 구조 명확
+- **독립적 컴포넌트**: 각 모듈별 개별 수정 및 테스트 가능
+- **확장 용이성**: 새 기능을 적절한 모듈에 쉽게 추가
+- **37줄 진입점**: 복잡한 로직은 모듈에, 메인은 단순하게
+
 ## 📋 환경 요구사항
 
 - **AWS 계정**: 적절한 IAM 권한 필요
@@ -204,10 +235,19 @@ mcp-test/
 
 ## 🤝 기여 방법
 
-1. 이슈 리포팅
-2. 새로운 보안 컨트롤 추가
-3. 성능 최적화
-4. 문서 개선
+### 개발자 가이드
+1. **이슈 리포팅**: 버그 발견 시 상세한 재현 과정 포함
+2. **새로운 보안 컨트롤 추가**: `security_checker.py`의 `_load_controls()`에 추가
+3. **새로운 AWS 서비스 지원**: `report_generator.py`의 쿼리 목록 확장
+4. **성능 최적화**: 캐싱 로직 개선, 병렬 처리 최적화
+5. **UI/보고서 개선**: `report_generator.py`의 HTML/CSS 템플릿 수정
+
+### 모듈별 개발 포인트
+- **설정 변경**: `src/config.py` 수정
+- **Steampipe 연동 개선**: `src/steampipe_client.py`
+- **보안 체크 추가**: `src/security_checker.py`
+- **보고서 기능 확장**: `src/report_generator.py`
+- **새 MCP 도구 추가**: `src/mcp_tools.py`
 
 ## 📄 라이선스
 
